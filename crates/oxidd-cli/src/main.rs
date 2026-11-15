@@ -524,6 +524,26 @@ where
             .or_insert_with(|| vec![i]);
     }
 
+    for (f, equiv) in equivalences.iter() {
+        print!("- {}", funcs[equiv[0]].1);
+        for &i in &equiv[1..] {
+            print!(", {}", funcs[i].1);
+        }
+        println!();
+
+        print!("  nodes: ");
+        io::stdout().flush().unwrap();
+        let start = Instant::now();
+        let count = f.node_count();
+        println!("{count} ({})", HDuration(start.elapsed()));
+    }
+
+    println!("reordering ...");
+    let start = Instant::now();
+    // TODO: reorder
+
+    println!("reordering took {}", HDuration(start.elapsed()));
+
     // Count nodes and satisfying assignments
     let mut model_count_cache: SatCountCache<
         oxidd_core::util::num::Natural,

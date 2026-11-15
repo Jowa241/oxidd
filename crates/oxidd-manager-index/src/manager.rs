@@ -895,6 +895,12 @@ unsafe impl<'id, DI: DiagramInfo> oxidd_core::Manager for Manager<'id, DI> {
     }
 
     #[inline]
+    fn num_nodes_level(&self, no: LevelNo) -> usize {
+        let level = self.unique_table[no as usize].lock();
+        level.len()
+    }
+
+    #[inline]
     fn approx_num_inner_nodes(&self) -> usize {
         let count = self.store().state.lock().node_count;
         if count < 0 { 0 } else { count as u64 as usize }
@@ -1178,7 +1184,6 @@ unsafe impl<'id, DI: DiagramInfo> oxidd_core::Manager for Manager<'id, DI> {
         self.reorder_count
     }
 }
-
 impl<'id, DI: DiagramInfo> oxidd_core::HasWorkers for Manager<'id, DI> {
     type WorkerPool = oxidd_core::util::Workers;
 

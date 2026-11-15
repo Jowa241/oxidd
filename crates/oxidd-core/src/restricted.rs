@@ -39,7 +39,7 @@ unsafe impl<T: SafeLevelSwapper<M>, M: Manager> LevelSwapper<M> for T {
         lower_no: LevelNo,
         upper_no_pre: LevelNo,
         lower_no_pre: LevelNo,
-    ) {
+    ) -> isize {
         debug_assert!(upper_no < lower_no);
         debug_assert!(lower_no < manager.num_levels());
         debug_assert!(upper_no_pre < manager.num_levels());
@@ -49,6 +49,8 @@ unsafe impl<T: SafeLevelSwapper<M>, M: Manager> LevelSwapper<M> for T {
         // lock.
         let mut upper = unsafe { manager.level_unchecked(upper_no) };
         let mut lower = unsafe { manager.level_unchecked(lower_no) };
+
+        let count_pre = upper.len() + lower.len();
 
         let abort_on_panic = AbortOnDrop("Some operation in `oxidd_reorder::level_down` panicked.");
         unsafe { upper.swap(&mut lower) };
@@ -106,6 +108,9 @@ unsafe impl<T: SafeLevelSwapper<M>, M: Manager> LevelSwapper<M> for T {
         }
 
         abort_on_panic.defuse();
+
+        let count_post = upper.view.len() + lower.view.len();
+        count_post.wrapping_sub(count_pre) as isize
     }
 }
 
