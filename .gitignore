@@ -12,6 +12,10 @@
 *.bdd
 *.dot
 
+# Testscript & results 
+/benchmark_results/
+
+
 # Temp files created by some text editors
 *~
 # Merge files created by git
