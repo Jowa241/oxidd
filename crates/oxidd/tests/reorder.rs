@@ -2,13 +2,15 @@
 
 // spell-checker:ignore nvars,mref
 
+use std::time::Duration;
+
 use oxidd::util::AllocResult;
 use oxidd::{
     BooleanFunction, Function, HasLevel, HasWorkers, InnerNode, LevelNo, Manager, ManagerRef, VarNo,
 };
 use oxidd_core::function::{INodeOfFunc, RulesOfFunc};
 use oxidd_core::{LevelSwapper, LevelView};
-use oxidd_reorder::{level_down, set_var_order};
+use oxidd_reorder::set_var_order;
 
 #[cfg(feature = "bcdd")]
 use oxidd::bcdd::BCDDFunction;
@@ -16,6 +18,9 @@ use oxidd::bcdd::BCDDFunction;
 use oxidd::bdd::BDDFunction;
 #[cfg(feature = "zbdd")]
 use oxidd::zbdd::ZBDDFunction;
+
+static TIME_LIMIT: Duration = Duration::from_millis(10000);
+static LEVEL_LIMIT: usize = 10;
 
 #[cfg(feature = "bdd")]
 #[test]
@@ -155,7 +160,7 @@ fn simple_level_down() -> AllocResult<()> {
     })?;
     // Only `conj` is still alive; the node for `x1 ∧ x2` is referenced by the
     // root node of `conj` alone.
-    let upper: LevelNo = mref.with_manager_exclusive(|manager| manager.var_to_level(0));
+    let _upper: LevelNo = mref.with_manager_exclusive(|manager| manager.var_to_level(0));
 
     Ok(())
 }
@@ -228,7 +233,7 @@ fn sifting_one_level_into_best_position_up_bigger() -> AllocResult<()> {
     mref.with_manager_exclusive(|manager| {
         let level_no = manager.var_to_level(8);
         manager.reorder(|reorder_context| {
-            oxidd_reorder::sifting_one_level(reorder_context, level_no);
+            oxidd_reorder::sifting_one_level(reorder_context, level_no, LEVEL_LIMIT);
         });
     });
     check(&[0, 8, 1, 2, 3, 4, 5, 6, 7, 9]);
@@ -272,7 +277,7 @@ fn sifting_one_level_into_best_position_up_simple() -> AllocResult<()> {
     mref.with_manager_exclusive(|manager| {
         let level_no = manager.var_to_level(3);
         manager.reorder(|reorder_context| {
-            oxidd_reorder::sifting_one_level(reorder_context, level_no);
+            oxidd_reorder::sifting_one_level(reorder_context, level_no, LEVEL_LIMIT);
         });
     });
     check(&[0, 3, 1, 2]);
@@ -330,7 +335,7 @@ fn sifting_one_level_into_best_position_down_bigger() -> AllocResult<()> {
     mref.with_manager_exclusive(|manager| {
         let level_no = manager.var_to_level(1);
         manager.reorder(|reorder_context| {
-            oxidd_reorder::sifting_one_level(reorder_context, level_no);
+            oxidd_reorder::sifting_one_level(reorder_context, level_no, LEVEL_LIMIT);
         });
     });
     check(&[0, 2, 3, 4, 5, 6, 7, 8, 9, 1]);
@@ -389,7 +394,12 @@ fn sifting_two_levels_into_best_position() -> AllocResult<()> {
         let level2 = manager.var_to_level(9);
         let seq: [u32; 2] = [level1, level2];
         manager.reorder(|reorder_context| {
-            oxidd_reorder::sifting_variable_sequence(reorder_context, &seq);
+            oxidd_reorder::sifting_variable_sequence(
+                reorder_context,
+                &seq,
+                TIME_LIMIT,
+                LEVEL_LIMIT,
+            );
         });
     });
     check(&[0, 4, 1, 2, 3, 5, 9, 6, 7, 8]);
@@ -445,7 +455,7 @@ fn sifting_easy_test() -> AllocResult<()> {
 
     mref.with_manager_exclusive(|manager| {
         manager.reorder(|reorder_context| {
-            oxidd_reorder::sifting(reorder_context);
+            oxidd_reorder::sifting(reorder_context, TIME_LIMIT, LEVEL_LIMIT);
         });
         print_order(manager);
     });
@@ -502,7 +512,7 @@ fn sifting_optimized_easy_test() -> AllocResult<()> {
 
     mref.with_manager_exclusive(|manager| {
         manager.reorder(|reorder_context| {
-            oxidd_reorder::sifting_optimized(reorder_context);
+            oxidd_reorder::sifting_optimized(reorder_context, TIME_LIMIT, LEVEL_LIMIT);
         });
         print_order(manager);
     });
@@ -560,7 +570,12 @@ fn sifting_seq_easy_test() -> AllocResult<()> {
     let vec: Vec<u32> = vec![1, 2, 3, 4, 0, 7, 6, 5, 8, 9];
     mref.with_manager_exclusive(|manager| {
         manager.reorder(|reorder_context| {
-            oxidd_reorder::sifting_variable_sequence(reorder_context, &vec);
+            oxidd_reorder::sifting_variable_sequence(
+                reorder_context,
+                &vec,
+                TIME_LIMIT,
+                LEVEL_LIMIT,
+            );
         });
         print_order(manager);
     });
@@ -617,7 +632,7 @@ fn sifting_sequence_heuristic_easy_test() -> AllocResult<()> {
 
     mref.with_manager_exclusive(|manager| {
         manager.reorder(|reorder_context| {
-            oxidd_reorder::sifting_heuristic_sequence(reorder_context, 20);
+            oxidd_reorder::sifting_heuristic_sequence(reorder_context, 20, TIME_LIMIT, LEVEL_LIMIT);
         });
         print_order(manager);
     });

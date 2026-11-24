@@ -124,8 +124,27 @@ struct Cli {
     #[arg(long, default_value_t = 1.0)]
     progress_interval: f32,
 
+    /// Reordering heuristic to use
+    #[arg(value_enum, long, default_value_t = Heuristic::FirstLayerOptimized)]
+    heuristic: Heuristic,
+
+    /// Time limit for the reordering
+    #[arg(long, default_value_t = 1000)]
+    time_limit_ms: u64,
+
+    /// Level limit for the reordering
+    #[arg(long, default_value_t = 10 as usize)]
+    level_limit: usize,
+
     /// Problem input file(s)
     file: Vec<PathBuf>,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+enum Heuristic {
+    FirstLayer,
+    BiggestLayerOptimized,
+    FirstLayerOptimized,
 }
 
 #[allow(clippy::upper_case_acronyms)]
@@ -524,6 +543,7 @@ where
             .or_insert_with(|| vec![i]);
     }
 
+    let mut count_before: usize = 0;
     for (f, equiv) in equivalences.iter() {
         print!("- {}", funcs[equiv[0]].1);
         for &i in &equiv[1..] {
@@ -534,13 +554,41 @@ where
         print!("  nodes: ");
         io::stdout().flush().unwrap();
         let start = Instant::now();
-        let count = f.node_count();
-        println!("{count} ({})", HDuration(start.elapsed()));
+        count_before = f.node_count();
+        println!("{count_before} ({})", HDuration(start.elapsed()));
     }
 
     println!("reordering ...");
     let start = Instant::now();
+
     // TODO: reorder
+
+    let time_limit: Duration = Duration::from_millis(cli.time_limit_ms);
+    let level_limit: usize = cli.level_limit;
+    let mut sifted_levels: usize = 0;
+
+    mref.with_manager_exclusive(|manager| {
+        manager.reorder(|reorder_context| {
+            let heuristic_num: usize = reorder_context.num_inner_nodes() / 10;
+            match cli.heuristic {
+                Heuristic::FirstLayer => {
+                    oxidd_reorder::sifting(reorder_context, time_limit, level_limit);
+                }
+                Heuristic::BiggestLayerOptimized => {
+                    oxidd_reorder::sifting_heuristic_sequence(
+                        reorder_context,
+                        heuristic_num,
+                        time_limit,
+                        level_limit,
+                    );
+                }
+                Heuristic::FirstLayerOptimized => {
+                    sifted_levels =
+                        oxidd_reorder::sifting_optimized(reorder_context, time_limit, level_limit)
+                }
+            }
+        });
+    });
 
     println!("reordering took {}", HDuration(start.elapsed()));
 
@@ -559,8 +607,16 @@ where
         print!("  nodes: ");
         io::stdout().flush().unwrap();
         let start = Instant::now();
-        let count = f.node_count();
-        println!("{count} ({})", HDuration(start.elapsed()));
+        let count_after = f.node_count();
+        println!("{count_after} ({})", HDuration(start.elapsed()));
+
+        println!(
+            "RESULT;{};{};{};{}",
+            count_before,
+            count_after,
+            count_after.wrapping_sub(count_before) as isize,
+            sifted_levels
+        );
 
         if cli.count_models {
             print!("  model count: ");

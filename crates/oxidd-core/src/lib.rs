@@ -1286,5 +1286,5 @@ pub unsafe trait LevelSwapper<M: Manager> {
         lower_no: LevelNo,
         upper_no_pre: LevelNo,
         lower_no_pre: LevelNo,
-    );
+    ) -> isize;
 }

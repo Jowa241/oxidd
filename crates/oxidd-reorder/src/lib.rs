@@ -3,9 +3,9 @@
 #![warn(missing_docs)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-use std::{array, iter::Map};
+use oxidd_core::{HasLevel, LevelNo, LevelSwapper, LevelView, Manager, Node, VarNo};
 
-use oxidd_core::{HasLevel, InnerNode, LevelNo, LevelSwapper, LevelView, Manager, Node, VarNo};
+use std::time::{Duration, Instant};
 
 mod set_var_order;
 pub use set_var_order::{set_var_order, set_var_order_seq};
@@ -49,12 +49,29 @@ where
     }
 }
 
+fn time_over(start: Instant, limit: Duration) -> bool {
+    if start.elapsed() >= limit {
+        true
+    } else {
+        false
+    }
+}
+
+// todo: outdated
 /// Find optimal position for 'level'
-pub fn sifting_one_level<M: Manager>(manager: &M, level: LevelNo) -> isize
+pub fn sifting_one_level<M: Manager>(
+    manager: &M,
+    level: LevelNo,
+    //time_limit: Duration,
+    level_limit: usize,
+) -> isize
 where
     M::InnerNode: HasLevel,
     M::Rules: LevelSwapper<M>,
 {
+    //get time
+    let start: Instant = Instant::now();
+
     debug_assert!(level < manager.num_levels()); // todo : assertion correct?
     // get mid position and direction
     let max_level: LevelNo = manager.num_levels() - 1;
@@ -69,13 +86,15 @@ where
     let mut bestpos: LevelNo = starting_level;
 
     let mut current_level: LevelNo = starting_level;
+    let mut counter: usize = 0;
 
     // Maybe we can speed up by only checking each position once, not twice in some cases?
-    for _n in 1..=2 {
+    'outer: for _n in 1..=2 {
         // assuming levels start at index 1
         if direction {
             while current_level > 1 {
                 let diff = unsafe { level_down(manager, current_level - 1) }; // move level up
+                counter += 1;
                 current_level -= 1;
 
                 // check if we found a better place
@@ -83,11 +102,22 @@ where
                     best += diff;
                     bestpos = current_level;
                 }
+
+                if counter >= level_limit {
+                    break 'outer;
+                }
+
+                /*
+                if time_over(start, time_limit) {
+                    println!("(sifting) time limit exceeded...moving layer into best position now");
+                    break 'outer;
+                }; */
             }
         }
         if !direction {
             while current_level < max_level {
                 let diff = unsafe { level_down(manager, current_level) }; // move level down
+                counter += 1;
                 current_level += 1;
 
                 // check if we found a better place
@@ -95,6 +125,15 @@ where
                     best += diff;
                     bestpos = current_level;
                 }
+
+                if counter >= level_limit {
+                    break 'outer;
+                }
+                /*
+                if time_over(start, time_limit) {
+                    println!("(sifting) time limit exceeded...moving layer into best position now");
+                    break 'outer;
+                }; */
             }
         }
 
@@ -110,18 +149,65 @@ where
         current_level += 1;
     }
 
+    println!("Needed {:?} ms for sifting one layer", start.elapsed());
+
     best
+}
+
+// todo: outdated
+/// sifts the given sequence of levels into the right order
+pub fn sifting_variable_sequence<M: Manager>(
+    manager: &M,
+    seq: &[VarNo],
+    time_limit: Duration,
+    level_limit: usize,
+) where
+    M::InnerNode: HasLevel,
+    M::Rules: LevelSwapper<M>,
+{
+    let start = Instant::now();
+    let mut counter = 0;
+    // Execute reordering
+    for var in seq {
+        let level: LevelNo = manager.var_to_level(*var);
+        sifting_one_level(manager, level, level_limit);
+        counter += 1;
+        if time_over(start, time_limit) {
+            break;
+        }
+    }
+    println!("Sifted {} Layers", counter);
+}
+
+// todo: normal sifting is outdated
+/// implements sifting
+pub fn sifting<M: Manager>(manager: &M, time_limit: Duration, level_limit: usize)
+where
+    M::InnerNode: HasLevel,
+    M::Rules: LevelSwapper<M>,
+{
+    let mut vars: Vec<u32> = vec![];
+
+    for level in manager.levels() {
+        vars.push(manager.level_to_var(level.level_no()));
+    }
+
+    sifting_variable_sequence(manager, &vars, time_limit, level_limit);
 }
 
 /// Find optimal position for 'level'
 pub fn sifting_one_level_optimized<M: Manager>(
     manager: &M,
     level: LevelNo,
-    mapping: &std::collections::HashMap<VarNo, LevelNo>,
+    mapping: &Vec<LevelNo>,
+    //time_limit: Duration,
+    level_limit: usize,
 ) where
     M::InnerNode: HasLevel,
     M::Rules: LevelSwapper<M>,
 {
+    let start: Instant = Instant::now();
+
     debug_assert!(level < manager.num_levels()); // todo : assertion correct?
     // get mid position and direction
     let max_level: LevelNo = manager.num_levels() - 1;
@@ -133,8 +219,10 @@ pub fn sifting_one_level_optimized<M: Manager>(
     let starting_level: LevelNo = level;
     //let old: isize = 0;
     let mut bestpos: LevelNo = starting_level;
-
     let mut current_level: LevelNo = starting_level;
+
+    let upper_level_limit: LevelNo = starting_level.saturating_add(level_limit as LevelNo);
+    let lower_level_limit: LevelNo = starting_level.saturating_sub(level_limit as LevelNo);
 
     // Maybe we can speed up by only checking each position once, not twice in some cases?
     for _n in 1..=2 {
@@ -150,8 +238,8 @@ pub fn sifting_one_level_optimized<M: Manager>(
                         manager,
                         current_level - 1,
                         current_level,
-                        *mapping.get(&upper_var).unwrap(),
-                        *mapping.get(&current_var).unwrap(),
+                        mapping[upper_var as usize],
+                        mapping[current_var as usize],
                     )
                 }; // move level up
                 current_level -= 1;
@@ -159,6 +247,9 @@ pub fn sifting_one_level_optimized<M: Manager>(
                 // check if we found a better place
                 if diff < 0 {
                     bestpos = current_level;
+                }
+                if current_level <= lower_level_limit {
+                    break;
                 }
             }
         }
@@ -171,8 +262,8 @@ pub fn sifting_one_level_optimized<M: Manager>(
                         manager,
                         current_level,
                         current_level + 1,
-                        *mapping.get(&current_var).unwrap(),
-                        *mapping.get(&lower_var).unwrap(),
+                        mapping[current_var as usize],
+                        mapping[lower_var as usize],
                     )
                 }; // move level down
                 current_level += 1;
@@ -181,9 +272,12 @@ pub fn sifting_one_level_optimized<M: Manager>(
                 if diff < 0 {
                     bestpos = current_level;
                 }
+
+                if current_level >= upper_level_limit {
+                    break;
+                }
             }
         }
-
         direction = !direction; // switch the direction
     }
 
@@ -195,8 +289,8 @@ pub fn sifting_one_level_optimized<M: Manager>(
                 manager,
                 current_level - 1,
                 current_level,
-                *mapping.get(&upper_var).unwrap(),
-                *mapping.get(&current_var).unwrap(),
+                mapping[upper_var as usize],
+                mapping[current_var as usize],
             )
         }; // move level up
         current_level -= 1;
@@ -209,51 +303,76 @@ pub fn sifting_one_level_optimized<M: Manager>(
                 manager,
                 current_level,
                 current_level + 1,
-                *mapping.get(&current_var).unwrap(),
-                *mapping.get(&lower_var).unwrap(),
+                mapping[current_var as usize],
+                mapping[lower_var as usize],
             )
         }; // move level down
         current_level += 1;
     }
+
+    println!(
+        "(Optimized) Needed {:?} ms for sifting one layer",
+        start.elapsed()
+    );
 }
 
 /// sifts the given sequence of levels into the right order
-pub fn sifting_variable_sequence<M: Manager>(manager: &M, seq: &[VarNo])
+pub fn sifting_variable_sequence_optimized<M: Manager>(
+    manager: &M,
+    seq: &[VarNo],
+    time_limit: Duration,
+    level_limit: usize,
+) -> usize
 where
     M::InnerNode: HasLevel,
     M::Rules: LevelSwapper<M>,
 {
-    // Execute reordering
-    for var in seq {
-        let level: LevelNo = manager.var_to_level(*var);
-        sifting_one_level(manager, level);
-    }
-}
+    let var_to_nodelevels: Vec<LevelNo> = (0..manager.num_vars())
+        .map(|var| manager.var_to_level(var))
+        .collect();
 
-/// sifts the given sequence of levels into the right order
-pub fn sifting_variable_sequence_optimized<M: Manager>(manager: &M, seq: &[VarNo])
-where
-    M::InnerNode: HasLevel,
-    M::Rules: LevelSwapper<M>,
-{
-    let mut var_to_nodelevels: std::collections::HashMap<VarNo, LevelNo> =
-        std::collections::HashMap::new();
-    for var in seq {
-        var_to_nodelevels.insert(*var, manager.var_to_level(*var));
-    }
+    let start = Instant::now();
+    let mut counter = 0;
     // Execute reordering
     for var in seq {
         let level: LevelNo = manager.var_to_level(*var);
-        sifting_one_level_optimized(manager, level, &var_to_nodelevels);
+        sifting_one_level_optimized(manager, level, &var_to_nodelevels, level_limit);
+        counter += 1;
+        if time_over(start, time_limit) {
+            break;
+        }
     }
     // Fix node levels
     for level in manager.levels() {
         update_level_no(manager, &level);
     }
+
+    println!("(optimized) Sifted {} Layers", counter);
+    counter
+}
+
+/// implements sifting
+pub fn sifting_optimized<M: Manager>(manager: &M, time_limit: Duration, level_limit: usize) -> usize
+where
+    M::InnerNode: HasLevel,
+    M::Rules: LevelSwapper<M>,
+{
+    let mut vars: Vec<u32> = vec![];
+
+    for level in manager.levels() {
+        vars.push(manager.level_to_var(level.level_no()));
+    }
+
+    return sifting_variable_sequence_optimized(manager, &vars, time_limit, level_limit);
 }
 
 /// Finds and sifts a variable sequence based on the num of nodes on each level
-pub fn sifting_heuristic_sequence<M: Manager>(manager: &M, num: usize)
+pub fn sifting_heuristic_sequence<M: Manager>(
+    manager: &M,
+    num: usize,
+    time_limit: Duration,
+    level_limit: usize,
+) -> usize
 where
     M::InnerNode: HasLevel,
     M::Rules: LevelSwapper<M>,
@@ -272,35 +391,5 @@ where
 
     let heuristic: &[u32] = if num < seq.len() { &seq[..num] } else { &seq };
 
-    sifting_variable_sequence(manager, &heuristic);
-}
-
-/// implements sifting
-pub fn sifting<M: Manager>(manager: &M)
-where
-    M::InnerNode: HasLevel,
-    M::Rules: LevelSwapper<M>,
-{
-    let mut vars: Vec<u32> = vec![];
-
-    for level in manager.levels() {
-        vars.push(manager.level_to_var(level.level_no()));
-    }
-
-    sifting_variable_sequence(manager, &vars);
-}
-
-/// implements sifting
-pub fn sifting_optimized<M: Manager>(manager: &M)
-where
-    M::InnerNode: HasLevel,
-    M::Rules: LevelSwapper<M>,
-{
-    let mut vars: Vec<u32> = vec![];
-
-    for level in manager.levels() {
-        vars.push(manager.level_to_var(level.level_no()));
-    }
-
-    sifting_variable_sequence_optimized(manager, &vars);
+    return sifting_variable_sequence_optimized(manager, &heuristic, time_limit, level_limit);
 }
